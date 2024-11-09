@@ -59,3 +59,20 @@ int isClientRegistered(Client clients[], int clientCount, struct sockaddr_in* cl
     }
     return 0;
 }
+
+
+void cleanInactiveClients(Client clients[], int* clientCount) {
+    time_t current_time = time(NULL);
+    for (int i = 0; i < *clientCount; i++) {
+        if (difftime(current_time, clients[i].last_active) > TIMEOUT) {
+            printf("Client %s is inactive. Closing connection.\n", inet_ntoa(clients[i].addr.sin_addr));
+            closesocket(clients[i].socket);
+
+            for (int j = i; j < *clientCount - 1; j++) {
+                clients[j] = clients[j + 1];
+            }
+            (*clientCount)--;  
+            i--;  
+        }
+    }
+}
