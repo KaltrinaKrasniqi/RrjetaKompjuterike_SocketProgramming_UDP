@@ -33,12 +33,29 @@ void logRequest(const char* client_ip, const char* request) {
     time(&current_time);
     time_str = ctime(&current_time);
 
-    // Removing newline from ctime
+   
     time_str[strlen(time_str) - 1] = '\0';
 
     char log_entry[BUFLEN];
     snprintf(log_entry, sizeof(log_entry), "[%s] Request from %s: %s\n", time_str, client_ip, request);
-
-    // Append the log entry to the log file
     appendFile("server_log.txt", log_entry);
+}
+
+
+typedef struct {
+    struct sockaddr_in addr;
+    time_t last_active;
+    SOCKET socket;  
+} Client;
+
+
+int isClientRegistered(Client clients[], int clientCount, struct sockaddr_in* clientAddr) {
+    for (int i = 0; i < clientCount; i++) {
+        if (clients[i].addr.sin_addr.s_addr == clientAddr->sin_addr.s_addr &&
+            clients[i].addr.sin_port == clientAddr->sin_port) {
+            clients[i].last_active = time(NULL); 
+            return 1;
+        }
+    }
+    return 0;
 }
