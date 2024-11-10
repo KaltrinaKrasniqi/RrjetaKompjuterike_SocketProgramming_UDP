@@ -4,7 +4,9 @@ Overview
 This project implements a UDP-based server-client architecture in C, designed for real-time communication across multiple devices on a network. The server manages connections, enforces user permissions, logs requests for auditing, and maintains efficient resource usage. One client has full access to execute commands on the server, while other clients have read-only access.
 
 Features
+
 Server
+
 Configurable Port and IP Address: The server’s IP and port number are customizable to allow flexible setup and network configuration.
 Connection Management:
   - Listens for incoming connections from multiple clients.
