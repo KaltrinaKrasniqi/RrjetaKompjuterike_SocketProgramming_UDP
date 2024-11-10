@@ -175,111 +175,81 @@ int main() {
     system("title UDP Server");
 
     WSADATA wsa;
-    printf("Initialising Winsock...");
+    printf("Initializing Winsock...");
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         printf("Failed. Error Code: %d", WSAGetLastError());
         exit(0);
     }
-    printf("Initialised.\n");
+    printf("Initialized.\n");
 
     SOCKET server_socket;
-    if ((server_socket = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
-        printf("Could not create socket: %d", WSAGetLastError());
+    if ((server_socket = socket(AF_INET, SOCK_DGRAM, 0)) == SOCKET_ERROR) {
+        printf("Error in socket creation: %d", WSAGetLastError());
+        return -1;
     }
-    printf("Socket created.\n");
 
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(PORT);
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(server_socket, (struct sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
-        printf("Bind failed with error code: %d", WSAGetLastError());
-        exit(EXIT_FAILURE);
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        printf("Bind failed with error code %d", WSAGetLastError());
+        return -1;
     }
-    puts("Bind done.");
 
-    // Lista e klientëve të regjistruar
+    printf("Server listening on port %d...\n", PORT);
+
     Client clients[MAX_CLIENTS];
-    int clientCount = 0;
-
-    // Lista për klientët në pritje
     Client waiting_clients[MAX_CLIENTS];
+    int clientCount = 0;
     int waiting_client_count = 0;
 
-    // Timeout setup
-    fd_set readfds;
-    struct timeval timeout;
-
     while (1) {
-        printf("Waiting for data...\n");
-        fflush(stdout);
+        char buffer[BUFLEN];
+        struct sockaddr_in client_addr;
+        int client_addr_len = sizeof(client_addr);
 
-        timeout.tv_sec = TIMEOUT;
-        timeout.tv_usec = 0;
-        FD_ZERO(&readfds);
-        FD_SET(server_socket, &readfds);
-
-        int select_result = select(0, &readfds, NULL, NULL, &timeout);
-        if (select_result == 0) {
-            printf("No data received for %d seconds. Checking connections...\n", TIMEOUT);
-            cleanInactiveClients(clients, &clientCount, waiting_clients, &waiting_client_count);
+        // Marrja e data from client
+        int recv_len = recvfrom(server_socket, buffer, BUFLEN, 0, (struct sockaddr*)&client_addr, &client_addr_len);
+        if (recv_len == SOCKET_ERROR) {
+            printf("Recvfrom failed with error code %d", WSAGetLastError());
             continue;
         }
 
-        char message[BUFLEN] = { 0 };
-        struct sockaddr_in clientAddr;
-        int slen = sizeof(clientAddr);
-        int message_len;
+        buffer[recv_len] = '\0';  // Null-terminate received data
+        printf("Received message: %s\n", buffer);
 
-        if ((message_len = recvfrom(server_socket, message, BUFLEN, 0, (struct sockaddr*)&clientAddr, &slen)) == SOCKET_ERROR) {
-            printf("recvfrom() failed with error code: %d", WSAGetLastError());
-            continue;
-        }
+        // Log request
+        logRequest(inet_ntoa(client_addr.sin_addr), buffer);
 
-        // Log the request with timestamp and IP
-        logRequest(inet_ntoa(clientAddr.sin_addr), message);
-
-        // Kontrollo nëse serveri është plot
-        if (clientCount < MAX_CLIENTS) {
-            // Lejo klientin të lidhet
-            printf("New client connected from %s\n", inet_ntoa(clientAddr.sin_addr));
-
-            // Krijo socket për klientin
-            SOCKET client_socket = socket(AF_INET, SOCK_DGRAM, 0);
-            if (client_socket == INVALID_SOCKET) {
-                printf("Error creating socket for client.\n");
-                continue;
-            }
-
-            // Regjistro klientin dhe lidhje socketin me të
-            clients[clientCount].addr = clientAddr;
-            clients[clientCount].last_active = time(NULL);
-            clients[clientCount].socket = client_socket; // Save the client's socket
-            clientCount++;
-
-            // Dërgo një mesazh klientit për lidhjen
-            char response[BUFLEN];
-            snprintf(response, sizeof(response), "You are now connected. Welcome!");
-            sendto(server_socket, response, strlen(response), 0, (struct sockaddr*)&clientAddr, sizeof(struct sockaddr_in));
+        // Handle client request
+        if (isClientRegistered(clients, clientCount, &client_addr)) {
+            handle_client_message(server_socket, buffer, &client_addr);
         }
         else {
-            // Serveri është plot, vendos klientin në waiting queue
-            printf("Server is full. Adding client to waiting queue from %s\n", inet_ntoa(clientAddr.sin_addr));
-
-            waiting_clients[waiting_client_count].addr = clientAddr;
-            waiting_clients[waiting_client_count].last_active = time(NULL);
-            waiting_client_count++;
-
-            // Dërgo mesazh që klienti është në pritje
-            char waitingMsg[BUFLEN];
-            snprintf(waitingMsg, sizeof(waitingMsg), "Server is full. You are in the waiting queue.");
-            sendto(server_socket, waitingMsg, strlen(waitingMsg), 0, (struct sockaddr*)&clientAddr, sizeof(struct sockaddr_in));
+            if (clientCount < MAX_CLIENTS) {
+                clients[clientCount].addr = client_addr;
+                clients[clientCount].socket = server_socket;
+                clients[clientCount].last_active = time(NULL);
+                clientCount++;
+                handle_client_message(server_socket, buffer, &client_addr);
+            }
+            else {
+                // Add to waiting clients if the server is full
+                waiting_clients[waiting_client_count].addr = client_addr;
+                waiting_clients[waiting_client_count].socket = server_socket;
+                waiting_clients[waiting_client_count].last_active = time(NULL);
+                waiting_client_count++;
+                sendto(server_socket, "Server is full. You are added to the waiting list.", 51, 0, (struct sockaddr*)&client_addr, sizeof(client_addr));
+            }
         }
+
+        cleanInactiveClients(clients, &clientCount, waiting_clients, &waiting_client_count);
     }
 
     closesocket(server_socket);
     WSACleanup();
+
     return 0;
 }
-
