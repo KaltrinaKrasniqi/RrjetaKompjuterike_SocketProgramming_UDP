@@ -9,14 +9,14 @@
 #pragma warning(disable : 4996)
 
 #define BUFLEN 512
-#define MAX_CLIENTS 5
+#define MAX_CLIENTS 3
 #define PORT 8888
-#define TIMEOUT 10 
-#define WAITING_TIMEOUT 10 
+#define TIMEOUT 30
+#define WAITING_TIMEOUT 10
 
-
+// funksioni me append content ne file
 void appendFile(const char* filename, const char* content) {
-    FILE* file = fopen(filename, "a"); 
+    FILE* file = fopen(filename, "a");
     if (file != NULL) {
         fputs(content, file);
         fclose(file);
@@ -26,55 +26,149 @@ void appendFile(const char* filename, const char* content) {
     }
 }
 
-
+// funksioni me logu requestat dhe ip-t e klientit
 void logRequest(const char* client_ip, const char* request) {
     time_t current_time;
     char* time_str;
     time(&current_time);
     time_str = ctime(&current_time);
-
-   
     time_str[strlen(time_str) - 1] = '\0';
-
     char log_entry[BUFLEN];
     snprintf(log_entry, sizeof(log_entry), "[%s] Request from %s: %s\n", time_str, client_ip, request);
     appendFile("server_log.txt", log_entry);
 }
 
-
+// Struktura per menaxhimin e lidhjeve te klientit
 typedef struct {
     struct sockaddr_in addr;
     time_t last_active;
-    SOCKET socket;  
+    SOCKET socket;
 } Client;
 
 
+// shikimi se a eshte klienti i regjistruar
 int isClientRegistered(Client clients[], int clientCount, struct sockaddr_in* clientAddr) {
     for (int i = 0; i < clientCount; i++) {
         if (clients[i].addr.sin_addr.s_addr == clientAddr->sin_addr.s_addr &&
             clients[i].addr.sin_port == clientAddr->sin_port) {
-            clients[i].last_active = time(NULL); 
+            clients[i].last_active = time(NULL); // Update last active time
             return 1;
         }
     }
     return 0;
 }
 
-
-void cleanInactiveClients(Client clients[], int* clientCount) {
+// Funksion per largimin e klienteve joaktiv
+void cleanInactiveClients(Client clients[], int* clientCount, Client waiting_clients[], int* waiting_client_count) {
     time_t current_time = time(NULL);
     for (int i = 0; i < *clientCount; i++) {
         if (difftime(current_time, clients[i].last_active) > TIMEOUT) {
+
             printf("Client %s is inactive. Closing connection.\n", inet_ntoa(clients[i].addr.sin_addr));
             closesocket(clients[i].socket);
+
 
             for (int j = i; j < *clientCount - 1; j++) {
                 clients[j] = clients[j + 1];
             }
-            (*clientCount)--;  
-            i--;  
+            (*clientCount)--;
+            i--;
         }
     }
+
+    // Kontrollo dhe merr nje klient nga queue nese lirohet vendi
+    if (*clientCount < MAX_CLIENTS && *waiting_client_count > 0) {
+
+        clients[*clientCount] = waiting_clients[0];
+        (*clientCount)++;
+        for (int i = 0; i < *waiting_client_count - 1; i++) {
+            waiting_clients[i] = waiting_clients[i + 1];
+        }
+        (*waiting_client_count)--;
+
+        char message[BUFLEN];
+        snprintf(message, sizeof(message), "You are now active. Welcome!");
+        sendto(clients[*clientCount - 1].socket, message, strlen(message), 0, (struct sockaddr*)&clients[*clientCount - 1].addr, sizeof(clients[*clientCount - 1].addr));
+    }
+}
+
+void handle_client_message(SOCKET client_socket, char* command, struct sockaddr_in* client_addr) {
+    char response[BUFLEN];
+
+
+    if (strncmp(command, "read", 4) == 0) {
+        char file_name[BUFLEN];
+        sscanf(command, "read %[^\n]", file_name);
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
+        strcat(path, file_name);
+
+        FILE* file = fopen(path, "r");
+        if (file) {
+            char file_content[BUFLEN];
+            size_t bytes_read = fread(file_content, 1, sizeof(file_content) - 1, file);
+            file_content[bytes_read] = '\0';
+
+            snprintf(response, sizeof(response), "File content:\n%s", file_content);
+            fclose(file);
+        }
+        else {
+            snprintf(response, sizeof(response), "Failed to open file %s.", file_name);
+        }
+        sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+    }
+
+    else if (strncmp(command, "write", 5) == 0) {
+        char filename[BUFLEN], content[BUFLEN];
+        sscanf(command, "write %[^\n] %[^\n]", filename, content);
+
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
+        strcat(path, filename);
+
+        FILE* file = fopen(path, "r+");
+        if (file) {
+
+            fseek(file, 0, SEEK_END);
+            fprintf(file, "%s\n", content);
+            fclose(file);
+
+
+            sendto(client_socket, content, strlen(content), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+        }
+        else {
+
+            perror("Error opening file");
+            snprintf(response, sizeof(response), "Failed to open file for writing. File may not exist.");
+            sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+        }
+    }
+
+
+
+    else if (strncmp(command, "mkdir", 5) == 0) {
+
+        char dir_name[BUFLEN];
+        sscanf(command + 6, "%[^\n]", dir_name);
+
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
+        strcat(path, dir_name);
+
+        if (_mkdir(path) == 0) {
+            snprintf(response, sizeof(response), "Directory '%s' created successfully.", dir_name);
+        }
+        else {
+            snprintf(response, sizeof(response), "Failed to create directory '%s'.", dir_name);
+        }
+
+        response[sizeof(response) - 1] = '\0';
+
+        sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+    }
+
+    else {
+        snprintf(response, sizeof(response), "Unknown command.");
+        sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+    }
+
 }
 
 int main() {
