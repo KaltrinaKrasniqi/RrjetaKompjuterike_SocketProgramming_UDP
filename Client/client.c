@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <winsock2.h>
+#include <stdlib.h>
+#include <time.h>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma warning(disable : 4996)
@@ -56,6 +59,7 @@ void write_file(SOCKET client_socket, struct sockaddr_in server_addr) {
     recvfrom(client_socket, response, BUFLEN, 0, NULL, NULL);
     printf("%s\n", response);
 }
+////funskioni per me i handle klientat full_access
 void handle_full_access_commands(SOCKET client_socket, struct sockaddr_in server_addr) {
     int choice;
 
@@ -81,14 +85,23 @@ void handle_full_access_commands(SOCKET client_socket, struct sockaddr_in server
     case 3:
         printf("Enter directory name to create: ");
         fgets(command, BUFLEN, stdin);
-        command[strcspn(command, "\n")] = '\0';  // Remove newline
-        snprintf(command, sizeof(command), "mkdir %s", command);  // Command to create directory
-        sendto(client_socket, command, strlen(command), 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+        command[strcspn(command, "\n")] = '\0';// Remove newline
 
-        // Wait for server response
-        char response[BUFLEN];
-        recvfrom(client_socket, response, BUFLEN, 0, NULL, NULL);
-        printf("%s\n", response);
+        if (strncmp(command, "mkdir ", 6) == 0) {
+           
+            char dir_name[BUFLEN];
+            strcpy(dir_name, command + 6);  
+
+           
+            snprintf(command, sizeof(command), "mkdir %s", dir_name);  
+
+           
+            sendto(client_socket, command, strlen(command), 0, (struct sockaddr*)&server_addr, sizeof(server_addr));
+        }
+        else {
+           
+            printf("Invalid command. Please start the command with 'mkdir'.\n");
+        }
         break;
     case 4:
         printf("Exiting...\n");
@@ -99,6 +112,7 @@ void handle_full_access_commands(SOCKET client_socket, struct sockaddr_in server
         return;
     }
 }
+//funskioni per me i handle funksionet  e klientave me read_access
 void handle_read_only_access(SOCKET client_socket, struct sockaddr_in server_addr) {
     // Simulate system information for read-only users
     const char* system_info[] = {
@@ -113,7 +127,7 @@ void handle_read_only_access(SOCKET client_socket, struct sockaddr_in server_add
     };
 
     int num_info = sizeof(system_info) / sizeof(system_info[0]);
-    srand(time(NULL)); // Seed for random number generation
+    srand(time(NULL)); //gjenerim i numrave random per mesazhe
 
     int random_index = rand() % num_info;
 
@@ -219,6 +233,7 @@ int main() {
             handle_full_access_commands(client_socket, server_addr);
         }
         else if (userPermission == READ_ONLY) {
+                  printf("Heeej");
             handle_read_only_access(client_socket, server_addr);
         }
     }
