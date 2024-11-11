@@ -9,10 +9,11 @@
 #pragma warning(disable : 4996)
 
 #define BUFLEN 512
-#define MAX_CLIENTS 3
+#define MAX_CLIENTS 5
 #define PORT 8888
 #define TIMEOUT 30
 #define WAITING_TIMEOUT 10
+#define READ_DELAY 3000 // Delay per read-only klient
 
 // funksioni me append content ne file
 void appendFile(const char* filename, const char* content) {
@@ -43,6 +44,7 @@ typedef struct {
     struct sockaddr_in addr;
     time_t last_active;
     SOCKET socket;
+    int read_only;  // Flag per me shiku a eshte klienti read-only
 } Client;
 
 
@@ -92,14 +94,29 @@ void cleanInactiveClients(Client clients[], int* clientCount, Client waiting_cli
     }
 }
 
-void handle_client_message(SOCKET client_socket, char* command, struct sockaddr_in* client_addr) {
+
+void delayA(int number_of_seconds)
+{
+    // Converting time into milli_seconds
+    int milli_seconds = 1000 * number_of_seconds;
+    clock_t start_time = clock();
+    while (clock() < start_time + milli_seconds)
+        ;
+}
+
+void handle_client_message(SOCKET client_socket, char* command, struct sockaddr_in* client_addr, Client* client) {
     char response[BUFLEN];
 
+    if (client->read_only && strncmp(command, "read", 4) == 0) {
+        printf("Delaying read request for read-only client...\n");
+        delayA(5);  
+    }
 
     if (strncmp(command, "read", 4) == 0) {
+
         char file_name[BUFLEN];
         sscanf(command, "read %[^\n]", file_name);
-        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\RrjetaKompjuterike_SocketProgramming_UDP\\Server\\";
         strcat(path, file_name);
 
         FILE* file = fopen(path, "r");
@@ -119,39 +136,67 @@ void handle_client_message(SOCKET client_socket, char* command, struct sockaddr_
 
     else if (strncmp(command, "write", 5) == 0) {
         char filename[BUFLEN], content[BUFLEN];
-        sscanf(command, "write %[^\n] %[^\n]", filename, content);
+        
+        int num_fields = sscanf(command, "write %s %[^\n]", filename, content);
 
-        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
+        if (num_fields < 2) {
+            snprintf(response, sizeof(response), "Error: Invalid write command.");
+            sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+            return;
+        }
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\RrjetaKompjuterike_SocketProgramming_UDP\\Server\\";
         strcat(path, filename);
 
-        FILE* file = fopen(path, "r+");
+        
+        FILE* file = fopen(path, "a+");
         if (file) {
-
-            fseek(file, 0, SEEK_END);
+            
             fprintf(file, "%s\n", content);
             fclose(file);
 
-
-            sendto(client_socket, content, strlen(content), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+            snprintf(response, sizeof(response), "Content successfully written to %s", filename);
+            sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
         }
         else {
-
+            
             perror("Error opening file");
             snprintf(response, sizeof(response), "Failed to open file for writing. File may not exist.");
             sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
         }
     }
 
-
-
     else if (strncmp(command, "mkdir", 5) == 0) {
 
+        
         char dir_name[BUFLEN];
-        sscanf(command + 6, "%[^\n]", dir_name);
+        strcpy(dir_name, command + 6); 
 
-        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\Prova\\Prova\\";
-        strcat(path, dir_name);
+        
+        int start = 0;
+        while (dir_name[start] == ' ') start++; 
+        int end = strlen(dir_name) - 1;
+        while (end >= 0 && dir_name[end] == ' ') end--; 
+        printf("Directory name after trimmingggggggggg: '%s'\n", dir_name);
+       
+        if (start > end) {
+            snprintf(response, sizeof(response), "Error: No directory name provided.");
+            sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+            return;
+        }
+        printf("Directory name after trimming: '%s'\n", dir_name);
+        
+        dir_name[end + 1] = '\0';  
 
+       
+        char path[BUFLEN] = "C:\\Users\\kaltr\\source\\repos\\RrjetaKompjuterike_SocketProgramming_UDP\\Server\\";
+        if (strlen(path) + strlen(dir_name) + 1 < BUFLEN) {
+            strcat(path, dir_name);  
+        }
+        else {
+            snprintf(response, sizeof(response), "Error: Path is too long.");
+            sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
+            return;
+        }
         if (_mkdir(path) == 0) {
             snprintf(response, sizeof(response), "Directory '%s' created successfully.", dir_name);
         }
@@ -160,14 +205,13 @@ void handle_client_message(SOCKET client_socket, char* command, struct sockaddr_
         }
 
         response[sizeof(response) - 1] = '\0';
-
         sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
     }
-
     else {
         snprintf(response, sizeof(response), "Unknown command.");
         sendto(client_socket, response, strlen(response), 0, (struct sockaddr*)client_addr, sizeof(*client_addr));
     }
+
 
 }
 
